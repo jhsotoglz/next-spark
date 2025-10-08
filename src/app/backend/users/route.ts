@@ -11,54 +11,47 @@ type UsernameDoc = {
 
 const COLLECTION = "usernames";
 
+// POST /backend/users
 export async function POST(req: Request) {
   try {
     const db = await getDb();
-    const { username } = (await req.json()) as Partial<UsernameDoc>;
+    const body = await req.json();
 
-    if (typeof username !== "string") {
-      return NextResponse.json({ ok: false, error: "username must be a string" }, { status: 400 });
-    }
+    const username = body?.username;
 
-    const clean = username.trim();
-    if (clean.length < 3 || clean.length > 24 || !/^[A-Za-z0-9_]+$/.test(clean)) {
+    // Size validation
+    if (typeof username !== "string" || username.length === 3 || username.length > 64) {
       return NextResponse.json(
-        {
-          ok: false,
-          error:
-            "username must be 3–24 characters long and can only contain letters, numbers, and underscores",
-        },
-        { status: 400 },
+        { ok: false, error: "username must be a non-empty string up to 64 chars" },
+        { status: 400 }
       );
     }
 
-    await db.collection(COLLECTION).createIndex(
-      { username: 1 },
-      { unique: true, collation: { locale: "en", strength: 2 } }, // strength:2 = case-insensitive
-    );
+    // Not duplicate username validation
+    await db.collection(COLLECTION).createIndex({ username: 1 }, { unique: true });
 
     const res = await db.collection<UsernameDoc>(COLLECTION).insertOne({
-      username: clean,
+      username,               // store as-is
       createdAt: new Date(),
     });
 
-    return NextResponse.json({ ok: true, id: res.insertedId, username: clean }, { status: 201 });
+    return NextResponse.json({ ok: true, id: res.insertedId, username }, { status: 201 });
   } catch (err: any) {
-    // duplicate key error
     if (err?.code === 11000) {
-      return NextResponse.json({ ok: false, error: "username already exists (case-insensitive)" }, { status: 409 });
+      // exact duplicate prompt
+      return NextResponse.json({ ok: false, error: "username already exists" }, { status: 409 });
     }
     return NextResponse.json({ ok: false, error: err?.message || "unknown error" }, { status: 500 });
   }
 }
 
+// GET /backend/users
 export async function GET() {
   try {
     const db = await getDb();
     const items = await db
       .collection<UsernameDoc>(COLLECTION)
       .find({})
-      .project({ _id: 0 })
       .sort({ createdAt: -1 })
       .limit(50)
       .toArray();
